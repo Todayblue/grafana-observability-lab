@@ -1,0 +1,116 @@
+name: grafana-observability-lab
+
+services:
+  demo-api:
+    build: ./demo-api
+    ports:
+      - "${DEMO_API_PORT:-8081}:8080"
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4317
+    healthcheck:
+      test: ["CMD", "dotnet", "demo-api.dll", "--healthcheck"]
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.13.1
+    depends_on:
+      demo-api:
+        condition: service_healthy
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --web.enable-remote-write-receiver
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://localhost:9090/-/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:3.7.0
+    command: -config.file=/etc/loki/loki.yaml
+    ports:
+      - "${LOKI_PORT:-3100}:3100"
+    volumes:
+      - ./loki/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki-data:/loki
+    restart: unless-stopped
+
+  tempo-init:
+    image: busybox:1.37.0
+    user: "0:0"
+    command: ["sh", "-c", "chown -R 10001:10001 /data/tempo"]
+    volumes:
+      - tempo-data:/data/tempo
+    restart: "no"
+
+  tempo:
+    image: grafana/tempo:3.0.2
+    depends_on:
+      tempo-init:
+        condition: service_completed_successfully
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    ports:
+      - "${TEMPO_PORT:-3200}:3200"
+    volumes:
+      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/data/tempo
+    restart: unless-stopped
+
+  alloy:
+    image: grafana/alloy:v1.18.0
+    depends_on:
+      demo-api:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy
+      loki:
+        condition: service_started
+      tempo:
+        condition: service_started
+    command: ["run", "--server.http.listen-addr=0.0.0.0:12345", "/etc/alloy/config.alloy"]
+    ports:
+      - "${ALLOY_PORT:-12345}:12345"
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:13.1.0
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-admin}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/prometheus-overview.json
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://localhost:3000/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 15s
+    restart: unless-stopped
+
+volumes:
+  prometheus-data:
+  grafana-data:
+  loki-data:
+  tempo-data:
