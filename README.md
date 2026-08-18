@@ -84,3 +84,4 @@ For non-interactive use, run `./scripts/reset.sh --yes`.
 ## What is persisted?
 
 Docker named volumes retain Grafana data, Prometheus metrics, Loki logs, and Tempo traces across stops. Provisioning files and the starter dashboards remain version-controlled under `grafana/`; Prometheus, Loki, and Tempo configuration is under `prometheus/`, `loki/`, and `tempo/`.
+# grafana-observability-lab
