@@ -1,0 +1,38 @@
+name: grafana-otel-lgtm-lab
+
+# WP1/WP2: isolated local experiment. Phase 5 compose.yaml remains untouched.
+services:
+  lgtm:
+    image: grafana/otel-lgtm:0.34.0@sha256:b966ea107831d526d9eb8fe4d2d86c9e5731392fad9dce8296bcf2072031f07c
+    ports:
+      - "127.0.0.1:3300:3000"
+    environment:
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - lgtm-data:/data
+      # All mounts use new paths; bundled LGTM provisioning remains untouched.
+      - ./grafana/otel-lgtm/provisioning/datasources/lab.yaml:/otel-lgtm/grafana/conf/provisioning/datasources/otel-lgtm-lab.yaml:ro
+      - ./grafana/otel-lgtm/provisioning/dashboards/lab.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/otel-lgtm-lab.yaml:ro
+      - ./grafana/otel-lgtm/dashboards:/otel-lgtm/grafana/conf/provisioning/dashboards/otel-lgtm-lab:ro
+    restart: unless-stopped
+
+  demo-api:
+    build:
+      context: ./demo-api
+    ports:
+      - "127.0.0.1:8082:8080"
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://lgtm:4317"
+      OTEL_SERVICE_VERSION: "0.1.0-wp2"
+      OTEL_METRIC_EXPORT_INTERVAL: "5000"
+    healthcheck:
+      test: ["CMD", "dotnet", "demo-api.dll", "--healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  lgtm-data:

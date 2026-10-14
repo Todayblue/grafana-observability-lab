@@ -1,0 +1,53 @@
+apiVersion: 1
+
+# Additive experiment-owned data sources. Keep all bundled LGTM defaults intact.
+datasources:
+  - name: Lab OTel Prometheus
+    uid: lab-otel-prometheus
+    type: prometheus
+    access: proxy
+    url: http://127.0.0.1:9090
+    editable: false
+    jsonData:
+      timeInterval: 5s
+
+  - name: Lab OTel Loki
+    uid: lab-otel-loki
+    type: loki
+    access: proxy
+    url: http://127.0.0.1:3100
+    editable: false
+    jsonData:
+      maxLines: 1000
+      derivedFields:
+        # "label" matches Loki structured metadata; trace_id is NOT indexed.
+        - name: TraceID
+          matcherType: label
+          matcherRegex: "^trace_id$"
+          datasourceUid: lab-otel-tempo
+          url: '$${__value.raw}'
+          urlDisplayLabel: View Trace
+
+  - name: Lab OTel Tempo
+    uid: lab-otel-tempo
+    type: tempo
+    access: proxy
+    url: http://127.0.0.1:3200
+    editable: false
+    jsonData:
+      tracesToLogsV2:
+        datasourceUid: lab-otel-loki
+        spanStartTimeShift: "-10s"
+        spanEndTimeShift: "10s"
+        tags:
+          - key: service.name
+            value: service_name
+        filterByTraceID: false
+        filterBySpanID: false
+        customQuery: true
+        # Exact trace-id structured-metadata filter, never a Loki index label.
+        query: '{service_name="demo-api"} | trace_id = "$${__trace.traceId}"'
+      search:
+        hide: false
+      nodeGraph:
+        enabled: true

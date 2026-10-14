@@ -1,0 +1,13 @@
+apiVersion: 1
+
+providers:
+  - name: Observability Lab OTel
+    orgId: 1
+    folder: Observability Lab OTel
+    type: file
+    disableDeletion: true
+    editable: false
+    updateIntervalSeconds: 10
+    options:
+      path: /otel-lgtm/grafana/conf/provisioning/dashboards/otel-lgtm-lab
+      foldersFromFilesStructure: false
