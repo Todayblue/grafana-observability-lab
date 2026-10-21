@@ -1,28 +1,16 @@
-name: grafana-observability-lab
+# Local reference stack only; not a production/staging deployment template.
+name: grafana-alloy-observability
 
 services:
-  demo-api:
-    build: ./demo-api
-    ports:
-      - "${DEMO_API_PORT:-8081}:8080"
-    environment:
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4317
-    healthcheck:
-      test: ["CMD", "dotnet", "demo-api.dll", "--healthcheck"]
-    restart: unless-stopped
-
   prometheus:
     image: prom/prometheus:v3.13.1
-    depends_on:
-      demo-api:
-        condition: service_healthy
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=7d
       - --web.enable-remote-write-receiver
     ports:
-      - "${PROMETHEUS_PORT:-9090}:9090"
+      - "127.0.0.1:${PROMETHEUS_PORT:-19095}:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
@@ -36,9 +24,9 @@ services:
 
   loki:
     image: grafana/loki:3.7.0
-    command: -config.file=/etc/loki/loki.yaml
+    command: ["-config.file=/etc/loki/loki.yaml"]
     ports:
-      - "${LOKI_PORT:-3100}:3100"
+      - "127.0.0.1:${LOKI_PORT:-13105}:3100"
     volumes:
       - ./loki/loki.yaml:/etc/loki/loki.yaml:ro
       - loki-data:/loki
@@ -59,7 +47,7 @@ services:
         condition: service_completed_successfully
     command: ["-config.file=/etc/tempo/tempo.yaml"]
     ports:
-      - "${TEMPO_PORT:-3200}:3200"
+      - "127.0.0.1:${TEMPO_PORT:-13205}:3200"
     volumes:
       - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
       - tempo-data:/data/tempo
@@ -68,8 +56,6 @@ services:
   alloy:
     image: grafana/alloy:v1.18.0
     depends_on:
-      demo-api:
-        condition: service_healthy
       prometheus:
         condition: service_healthy
       loki:
@@ -78,25 +64,26 @@ services:
         condition: service_started
     command: ["run", "--server.http.listen-addr=0.0.0.0:12345", "/etc/alloy/config.alloy"]
     ports:
-      - "${ALLOY_PORT:-12345}:12345"
+      - "127.0.0.1:${ALLOY_UI_PORT:-12355}:12345"
+      - "127.0.0.1:${OTLP_GRPC_PORT:-14317}:4317"
+      - "127.0.0.1:${OTLP_HTTP_PORT:-14318}:4318"
     volumes:
       - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
     restart: unless-stopped
 
   grafana:
-    image: grafana/grafana:13.1.0
+    image: grafana/grafana:13.2.4
     depends_on:
       prometheus:
         condition: service_healthy
     ports:
-      - "${GRAFANA_PORT:-3000}:3000"
+      - "127.0.0.1:${GRAFANA_PORT:-13305}:3000"
     environment:
       GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
-      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:?Set_GRAFANA_ADMIN_PASSWORD_in_dotenv}"
+      GF_SECURITY_SECRET_KEY: "${GRAFANA_SECRET_KEY:?Set_GRAFANA_SECRET_KEY_in_dotenv}"
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_AUTH_ANONYMOUS_ENABLED: "false"
-      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/prometheus-overview.json
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
@@ -108,6 +95,26 @@ services:
       retries: 12
       start_period: 15s
     restart: unless-stopped
+
+  # Optional, synthetic validation app; NOT part of the default deployment.
+  demo-api:
+    profiles: ["demo"]
+    build: ./demo-api
+    depends_on:
+      alloy:
+        condition: service_started
+    ports:
+      - "127.0.0.1:${DEMO_API_PORT:-18085}:8080"
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4317
+      OTEL_METRIC_EXPORT_INTERVAL: "5000"
+    healthcheck:
+      test: ["CMD", "dotnet", "demo-api.dll", "--healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    restart: "no"
 
 volumes:
   prometheus-data:

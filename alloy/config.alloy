@@ -1,80 +1,5 @@
-prometheus.scrape "demo_api" {
-  targets = [
-    {
-      __address__ = "demo-api:8080",
-      __metrics_path__ = "/metrics",
-      job = "demo-api",
-    },
-  ]
-
-  scrape_interval = "5s"
-  scrape_timeout  = "4s"
-  forward_to      = [prometheus.remote_write.local_prometheus.receiver]
-}
-
-prometheus.remote_write "local_prometheus" {
-  endpoint {
-    url = "http://prometheus:9090/api/v1/write"
-  }
-}
-
-discovery.docker "containers" {
-  host = "unix:///var/run/docker.sock"
-
-  filter {
-    name   = "label"
-    values = ["com.docker.compose.service=demo-api"]
-  }
-}
-
-loki.source.docker "demo_api" {
-  host       = "unix:///var/run/docker.sock"
-  targets    = discovery.docker.containers.targets
-  forward_to = [loki.process.demo_api_structured.receiver]
-
-  labels = {
-    service     = "demo-api",
-    environment = "lab",
-  }
-}
-
-loki.process "demo_api_structured" {
-  stage.json {
-    expressions = {
-      level       = "LogLevel",
-      event_name  = "State.eventName",
-      endpoint    = "State.endpoint",
-      status_code = "State.statusCode",
-      duration_ms = "State.durationMs",
-      message     = "Message",
-    }
-  }
-
-  stage.labels {
-    values = {
-      level      = "",
-      event_name = "",
-      endpoint   = "",
-    }
-  }
-
-  stage.structured_metadata {
-    values = {
-      status_code = "",
-      duration_ms = "",
-    }
-  }
-
-  forward_to = [loki.write.local.receiver]
-}
-
-loki.write "local" {
-  endpoint {
-    url = "http://loki:3100/loki/api/v1/push"
-  }
-}
-
-otelcol.receiver.otlp "traces" {
+// Application metrics, logs, and traces arrive exclusively via OTLP.
+otelcol.receiver.otlp "application" {
   grpc {
     endpoint = "0.0.0.0:4317"
   }
@@ -84,13 +9,37 @@ otelcol.receiver.otlp "traces" {
   }
 
   output {
-    traces = [otelcol.processor.batch.traces.input]
+    metrics = [otelcol.processor.batch.application.input]
+    logs    = [otelcol.processor.batch.application.input]
+    traces  = [otelcol.processor.batch.application.input]
   }
 }
 
-otelcol.processor.batch "traces" {
+otelcol.processor.batch "application" {
+  timeout = "2s"
+
   output {
-    traces = [otelcol.exporter.otlp.tempo.input]
+    metrics = [otelcol.exporter.prometheus.application.input]
+    logs    = [otelcol.exporter.otlphttp.loki.input]
+    traces  = [otelcol.exporter.otlp.tempo.input]
+  }
+}
+
+otelcol.exporter.prometheus "application" {
+  resource_to_telemetry_conversion = true
+  forward_to = [prometheus.remote_write.local_prometheus.receiver]
+}
+
+prometheus.remote_write "local_prometheus" {
+  endpoint {
+    url = "http://prometheus:9090/api/v1/write"
+  }
+}
+
+// Native Loki OTLP ingestion: http://loki:3100/otlp/v1/logs.
+otelcol.exporter.otlphttp "loki" {
+  client {
+    endpoint = "http://loki:3100/otlp"
   }
 }
 

@@ -1,3 +1,7 @@
+# Retention-only provider. The dashboard source directory is intentionally empty.
+# Grafana 13.2.4 pruned pre-existing local dashboards when this provider file
+# was removed; keeping it with disableDeletion=true preserves the old volume.
+# Do not add training Dashboard JSON files back into this branch.
 apiVersion: 1
 
 providers:
